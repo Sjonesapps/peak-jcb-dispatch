@@ -1,1 +1,189 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Peak JCB Dispatch</title><link rel="stylesheet" href="/styles.css"></head><body><main class="shell"><header><div><p class="eyebrow">PEAK JCB</p><h1>Dispatch board</h1><p class="muted">One shared view of every haul, past and future.</p></div><button id="logout" class="ghost hidden">Sign out</button></header><section id="auth" class="card auth"><h2>Sign in to dispatch</h2><form id="authForm"><label>Email<input id="email" type="email" required autocomplete="email"></label><label>Password<input id="password" type="password" required minlength="8" autocomplete="current-password"></label><button id="authSubmit" type="submit">Sign in</button></form><button id="toggleAuth" class="link">Need an account? Create one</button><p id="authMsg" class="error"></p></section><section id="app" class="hidden"><div class="toolbar"><div class="filters"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="upcoming">Upcoming</button><button class="filter" data-filter="past">Past</button></div><button id="newTrip">+ New haul</button></div><div id="notice" class="notice hidden"></div><div id="tripList" class="trip-list"></div><section id="editor" class="card hidden"><div class="editor-head"><h2 id="editorTitle">New haul</h2><button id="cancelEdit" class="ghost">Cancel</button></div><form id="tripForm" class="grid"><input type="hidden" id="tripId"><label>Date<input id="tripDate" type="date" required></label><label>Customer<input id="customer" required maxlength="120"></label><label>Pickup<input id="pickup" required maxlength="180"></label><label>Delivery<input id="delivery" required maxlength="180"></label><label>Equipment<input id="equipment" placeholder="JCB 3CX"></label><label>Driver<input id="driver"></label><label>Status<select id="status"><option>Scheduled</option><option>In progress</option><option>Complete</option><option>Cancelled</option></select></label><label class="wide">Notes<textarea id="notes" rows="3"></textarea></label><button class="wide" type="submit">Save haul</button></form></section></section></main><script src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0c10">
+<meta name="description" content="Peak JCB Dispatch — shared transport command board for every haul, past and future.">
+<title>Peak JCB Dispatch — Command Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0c10'/%3E%3Cpath d='M6 23L16 7l10 16H20l-4-6.6L12 23z' fill='%23ffc72c'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<div class="fx" aria-hidden="true">
+  <div class="fx-grid"></div>
+  <div class="fx-glow fx-glow-a"></div>
+  <div class="fx-glow fx-glow-b"></div>
+  <div class="fx-scan"></div>
+  <div class="fx-vignette"></div>
+</div>
+
+<main class="shell">
+
+  <header class="topbar" id="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40" role="presentation">
+          <polygon class="bm-ring" points="20,2 36,11 36,29 20,38 4,29 4,11"></polygon>
+          <path class="bm-peak" d="M8 29 L20 9 L32 29 H25.2 L20 20.2 L14.8 29 Z"></path>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="eyebrow">PEAK JCB<i class="eyebrow-dot"></i>TRANSPORT</span>
+        <h1>Dispatch Command</h1>
+      </span>
+    </div>
+
+    <div class="topbar-right">
+      <div class="sysclock" id="sysclock" aria-hidden="true">
+        <span class="sysclock-dot"></span>
+        <span id="clockTime">--:--:--</span>
+        <span class="sysclock-sep">/</span>
+        <span id="clockDate">----</span>
+      </div>
+      <div class="userchip hidden" id="userchip">
+        <span class="userchip-avatar" id="userInitial">·</span>
+        <span class="userchip-mail" id="userEmail">—</span>
+      </div>
+      <button id="logout" class="btn ghost hidden" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <!-- ACCESS PANEL -->
+  <section id="auth" class="auth">
+    <div class="auth-card panel">
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+
+      <div class="auth-reticle" aria-hidden="true">
+        <svg viewBox="0 0 120 120">
+          <circle class="ret-out" cx="60" cy="60" r="54"></circle>
+          <circle class="ret-mid" cx="60" cy="60" r="41"></circle>
+          <circle class="ret-in"  cx="60" cy="60" r="28"></circle>
+          <path class="ret-peak" d="M40 74 L60 42 L80 74 H68.5 L60 60.4 L51.5 74 Z"></path>
+        </svg>
+      </div>
+
+      <p class="auth-kicker">SECURE ACCESS <span class="blink">▮</span></p>
+      <h2 id="authTitle">Dispatch sign-in</h2>
+      <p class="muted center">Authenticate to reach the shared transport board.</p>
+
+      <form id="authForm" autocomplete="on">
+        <label>Email
+          <input id="email" type="email" required autocomplete="email" placeholder="you@peakjcb.com" spellcheck="false">
+        </label>
+        <label>Password
+          <input id="password" type="password" required minlength="8" autocomplete="current-password" placeholder="••••••••">
+        </label>
+        <button id="authSubmit" class="btn primary" type="submit">
+          <span class="btn-label">Sign in</span>
+        </button>
+      </form>
+
+      <button id="toggleAuth" class="link" type="button">Need an account? Create one</button>
+      <p id="authMsg" class="error" role="alert"></p>
+    </div>
+
+    <p class="auth-foot">PEAK JCB DISPATCH <span class="dim">// v2 COMMAND INTERFACE</span></p>
+  </section>
+
+  <!-- COMMAND BOARD -->
+  <section id="app" class="hidden">
+
+    <div class="stats" id="stats">
+      <article class="stat panel" data-accent="yellow">
+        <span class="corner tl"></span><span class="corner br"></span>
+        <p class="stat-label">Total hauls</p>
+        <p class="stat-value" id="statTotal">0</p>
+        <p class="stat-foot">on the shared board</p>
+        <span class="stat-spark" aria-hidden="true"></span>
+      </article>
+      <article class="stat panel" data-accent="cyan">
+        <span class="corner tl"></span><span class="corner br"></span>
+        <p class="stat-label">Upcoming</p>
+        <p class="stat-value" id="statUpcoming">0</p>
+        <p class="stat-foot">today and forward</p>
+        <span class="stat-spark" aria-hidden="true"></span>
+      </article>
+      <article class="stat panel" data-accent="amber">
+        <span class="corner tl"></span><span class="corner br"></span>
+        <p class="stat-label">In progress</p>
+        <p class="stat-value" id="statActive">0</p>
+        <p class="stat-foot">rolling now</p>
+        <span class="stat-spark" aria-hidden="true"></span>
+      </article>
+      <article class="stat panel" data-accent="green">
+        <span class="corner tl"></span><span class="corner br"></span>
+        <p class="stat-label">Completed</p>
+        <p class="stat-value" id="statComplete">0</p>
+        <p class="stat-foot">delivered</p>
+        <span class="stat-spark" aria-hidden="true"></span>
+      </article>
+    </div>
+
+    <div class="toolbar">
+      <div class="filters" id="filters" role="tablist" aria-label="Haul views">
+        <span class="filter-glider" id="filterGlider" aria-hidden="true"></span>
+        <button class="filter active" data-filter="all" role="tab" aria-selected="true">All</button>
+        <button class="filter" data-filter="upcoming" role="tab" aria-selected="false">Upcoming</button>
+        <button class="filter" data-filter="past" role="tab" aria-selected="false">Past</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="refresh" class="btn ghost icon-btn" type="button" title="Refresh board" aria-label="Refresh board">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+        </button>
+        <button id="newTrip" class="btn primary" type="button"><span class="btn-plus">+</span> New haul</button>
+      </div>
+    </div>
+
+    <div id="notice" class="notice hidden" role="status"></div>
+
+    <div id="tripList" class="trip-list" aria-live="polite"></div>
+
+    <!-- EDITOR -->
+    <section id="editor" class="editor panel hidden" aria-label="Haul editor">
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+      <div class="editor-head">
+        <div>
+          <p class="editor-kicker">HAUL RECORD</p>
+          <h2 id="editorTitle">New haul</h2>
+        </div>
+        <button id="cancelEdit" class="btn ghost" type="button">Cancel</button>
+      </div>
+      <form id="tripForm" class="grid">
+        <input type="hidden" id="tripId">
+        <label>Date<input id="tripDate" type="date" required></label>
+        <label>Customer<input id="customer" required maxlength="120" placeholder="Dealership or customer"></label>
+        <label>Pickup<input id="pickup" required maxlength="180" placeholder="Yard / origin"></label>
+        <label>Delivery<input id="delivery" required maxlength="180" placeholder="Job site / destination"></label>
+        <label>Equipment<input id="equipment" maxlength="80" placeholder="JCB 3CX"></label>
+        <label>Driver<input id="driver" maxlength="80" placeholder="Assigned operator"></label>
+        <label>Status
+          <select id="status">
+            <option>Scheduled</option>
+            <option>In progress</option>
+            <option>Complete</option>
+            <option>Cancelled</option>
+          </select>
+        </label>
+        <label class="wide">Notes<textarea id="notes" rows="3" maxlength="500" placeholder="Gate codes, DOT clock notes, contact on site…"></textarea></label>
+        <button class="btn primary wide" type="submit"><span class="btn-label">Save haul</span></button>
+      </form>
+    </section>
+
+    <p class="board-foot">
+      <span class="live-dot"></span> LIVE SHARED BOARD
+      <span class="dim">// every sign-in sees the same records</span>
+    </p>
+  </section>
+
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

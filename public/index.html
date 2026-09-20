@@ -88,11 +88,30 @@
       <p id="authMsg" class="error" role="alert"></p>
     </div>
 
-    <p class="auth-foot">PEAK JCB DISPATCH <span class="dim">// v2 COMMAND INTERFACE</span></p>
+    <p class="auth-foot">PEAK JCB DISPATCH <span class="dim">// v3 COMMAND INTERFACE</span></p>
   </section>
 
   <!-- COMMAND BOARD -->
   <section id="app" class="hidden">
+
+    <!-- TRUCK STATUS RAIL -->
+    <div class="truckrail panel" id="truckRail">
+      <span class="corner tl"></span><span class="corner br"></span>
+      <div class="truckrail-id">
+        <span class="truckrail-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M3 18h13M5 18v-4h6l2-5h4l2 5h2v4"/><circle cx="7" cy="20" r="2"/><circle cx="18" cy="20" r="2"/></svg>
+        </span>
+        <div>
+          <p class="truckrail-label">TRANSPORT TRUCK 01</p>
+          <p class="truckrail-sub">Single shared asset · one haul at a time</p>
+        </div>
+      </div>
+      <div class="truckrail-state" id="truckState">
+        <span class="truckrail-led"></span>
+        <span id="truckStateText">Checking status…</span>
+      </div>
+      <div class="truckrail-next" id="truckNext"></div>
+    </div>
 
     <div class="stats" id="stats">
       <article class="stat panel" data-accent="yellow">
@@ -106,43 +125,81 @@
         <span class="corner tl"></span><span class="corner br"></span>
         <p class="stat-label">Upcoming</p>
         <p class="stat-value" id="statUpcoming">0</p>
-        <p class="stat-foot">today and forward</p>
+        <p class="stat-foot">not finished yet</p>
         <span class="stat-spark" aria-hidden="true"></span>
       </article>
       <article class="stat panel" data-accent="amber">
         <span class="corner tl"></span><span class="corner br"></span>
-        <p class="stat-label">In progress</p>
+        <p class="stat-label">On the road now</p>
         <p class="stat-value" id="statActive">0</p>
-        <p class="stat-foot">rolling now</p>
+        <p class="stat-foot">inside its window</p>
         <span class="stat-spark" aria-hidden="true"></span>
       </article>
       <article class="stat panel" data-accent="green">
         <span class="corner tl"></span><span class="corner br"></span>
-        <p class="stat-label">Completed</p>
-        <p class="stat-value" id="statComplete">0</p>
-        <p class="stat-foot">delivered</p>
+        <p class="stat-label">Truck hours</p>
+        <p class="stat-value" id="statHours">0</p>
+        <p class="stat-foot">booked next 7 days</p>
         <span class="stat-spark" aria-hidden="true"></span>
       </article>
     </div>
 
     <div class="toolbar">
-      <div class="filters" id="filters" role="tablist" aria-label="Haul views">
+      <div class="filters" id="filters" role="tablist" aria-label="Board views">
         <span class="filter-glider" id="filterGlider" aria-hidden="true"></span>
-        <button class="filter active" data-filter="all" role="tab" aria-selected="true">All</button>
+        <button class="filter active" data-filter="calendar" role="tab" aria-selected="true">Calendar</button>
         <button class="filter" data-filter="upcoming" role="tab" aria-selected="false">Upcoming</button>
         <button class="filter" data-filter="past" role="tab" aria-selected="false">Past</button>
+        <button class="filter" data-filter="all" role="tab" aria-selected="false">All</button>
       </div>
       <div class="toolbar-right">
         <button id="refresh" class="btn ghost icon-btn" type="button" title="Refresh board" aria-label="Refresh board">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
         </button>
-        <button id="newTrip" class="btn primary" type="button"><span class="btn-plus">+</span> New haul</button>
+        <button id="newTrip" class="btn primary" type="button"><span class="btn-plus">+</span> Book the truck</button>
       </div>
     </div>
 
     <div id="notice" class="notice hidden" role="status"></div>
+    <div id="clashWarn" class="clashwarn hidden" role="alert"></div>
 
-    <div id="tripList" class="trip-list" aria-live="polite"></div>
+    <!-- CALENDAR -->
+    <section id="calendar" class="calendar" aria-label="Truck calendar">
+      <div class="cal-head">
+        <div class="cal-nav">
+          <button id="calPrev" class="cal-arrow" type="button" aria-label="Previous month">‹</button>
+          <h2 id="calTitle">—</h2>
+          <button id="calNext" class="cal-arrow" type="button" aria-label="Next month">›</button>
+        </div>
+        <div class="cal-head-right">
+          <span class="cal-legend">
+            <i class="lg scheduled"></i>Scheduled
+            <i class="lg in-progress"></i>Rolling
+            <i class="lg complete"></i>Done
+            <i class="lg cancelled"></i>Cancelled
+          </span>
+          <button id="calToday" class="btn ghost" type="button">Today</button>
+        </div>
+      </div>
+      <div class="cal-dow" aria-hidden="true">
+        <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+      </div>
+      <div id="calGrid" class="cal-grid"></div>
+      <div id="dayPanel" class="daypanel panel hidden">
+        <span class="corner tl"></span><span class="corner br"></span>
+        <div class="daypanel-head">
+          <div>
+            <p class="daypanel-kicker">TRUCK SCHEDULE</p>
+            <h3 id="dayTitle">—</h3>
+          </div>
+          <button id="dayClose" class="btn ghost" type="button">Close</button>
+        </div>
+        <div id="dayBody"></div>
+        <button id="dayAdd" class="btn primary wide" type="button"><span class="btn-plus">+</span> Book this day</button>
+      </div>
+    </section>
+
+    <div id="tripList" class="trip-list hidden" aria-live="polite"></div>
 
     <!-- EDITOR -->
     <section id="editor" class="editor panel hidden" aria-label="Haul editor">
@@ -150,18 +207,36 @@
       <span class="corner bl"></span><span class="corner br"></span>
       <div class="editor-head">
         <div>
-          <p class="editor-kicker">HAUL RECORD</p>
-          <h2 id="editorTitle">New haul</h2>
+          <p class="editor-kicker">TRUCK BOOKING</p>
+          <h2 id="editorTitle">Book the truck</h2>
         </div>
         <button id="cancelEdit" class="btn ghost" type="button">Cancel</button>
       </div>
+
       <form id="tripForm" class="grid">
         <input type="hidden" id="tripId">
-        <label>Date<input id="tripDate" type="date" required></label>
+
+        <div class="slot wide">
+          <div class="slot-row">
+            <label class="slot-date">Date<input id="tripDate" type="date" required></label>
+            <label>Start<input id="tripStart" type="time" required step="900"></label>
+            <label>End<input id="tripEnd" type="time" required step="900"></label>
+          </div>
+          <div class="presets" id="presets">
+            <span class="presets-tag">QUICK WINDOW</span>
+            <button type="button" data-s="07:00" data-e="12:00">Morning</button>
+            <button type="button" data-s="12:00" data-e="17:00">Afternoon</button>
+            <button type="button" data-s="07:00" data-e="17:00">Full day</button>
+            <label class="multiday"><input type="checkbox" id="multiDay"> Multi-day haul</label>
+          </div>
+          <label id="endDateWrap" class="hidden">Return date<input id="tripEndDate" type="date"></label>
+          <div id="avail" class="avail" role="status"></div>
+        </div>
+
         <label>Customer<input id="customer" required maxlength="120" placeholder="Dealership or customer"></label>
+        <label>Equipment<input id="equipment" maxlength="80" placeholder="JCB 3CX"></label>
         <label>Pickup<input id="pickup" required maxlength="180" placeholder="Yard / origin"></label>
         <label>Delivery<input id="delivery" required maxlength="180" placeholder="Job site / destination"></label>
-        <label>Equipment<input id="equipment" maxlength="80" placeholder="JCB 3CX"></label>
         <label>Driver<input id="driver" maxlength="80" placeholder="Assigned operator"></label>
         <label>Status
           <select id="status">
@@ -172,13 +247,13 @@
           </select>
         </label>
         <label class="wide">Notes<textarea id="notes" rows="3" maxlength="500" placeholder="Gate codes, DOT clock notes, contact on site…"></textarea></label>
-        <button class="btn primary wide" type="submit"><span class="btn-label">Save haul</span></button>
+        <button class="btn primary wide" type="submit"><span class="btn-label">Save booking</span></button>
       </form>
     </section>
 
     <p class="board-foot">
       <span class="live-dot"></span> LIVE SHARED BOARD
-      <span class="dim">// every sign-in sees the same records</span>
+      <span class="dim">// one truck · no double-booking · every sign-in sees the same records</span>
     </p>
   </section>
 

@@ -156,9 +156,90 @@
         <button id="refresh" class="btn ghost icon-btn" type="button" title="Refresh board" aria-label="Refresh board">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
         </button>
+        <button id="openSettings" class="btn ghost" type="button" title="Pricing rate card">
+          <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/></svg>
+          Rate card
+        </button>
         <button id="newTrip" class="btn primary" type="button"><span class="btn-plus">+</span> Book the truck</button>
       </div>
     </div>
+
+    <!-- RATE CARD / PRICING SETTINGS -->
+    <section id="settings" class="settings panel hidden" aria-label="Pricing settings">
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+      <div class="editor-head">
+        <div>
+          <p class="editor-kicker">PRICING CONFIGURATION</p>
+          <h2>Rate card</h2>
+        </div>
+        <button id="closeSettings" class="btn ghost" type="button">Close</button>
+      </div>
+
+      <p class="settings-intro">
+        These figures drive every quote on the board. Enter what the haul
+        <b>costs Peak JCB</b>, then the margin you want on top — the customer price is
+        calculated from them.
+      </p>
+
+      <div id="settingsLock" class="settings-lock hidden" role="status"></div>
+
+      <form id="settingsForm" class="grid">
+        <fieldset class="fieldgroup wide">
+          <legend>What a haul costs you</legend>
+          <div class="fieldgroup-body">
+            <label>Base charge per haul
+              <span class="hint">Fixed cost to send the truck out at all — hook-up, loading, paperwork. Charged once per haul, not per mile.</span>
+              <span class="money-input"><i>$</i><input id="setBaseCost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="150.00"></span>
+            </label>
+            <label>Direct cost per mile
+              <span class="hint">Driver wages, tyres and wear, per mile driven.</span>
+              <span class="money-input"><i>$</i><input id="setCostPerMile" type="number" min="0" step="0.01" inputmode="decimal" placeholder="2.10"><em>/mi</em></span>
+            </label>
+            <label>Operating / fuel cost per mile
+              <span class="hint">Fuel and DEF, per mile driven. Keep it separate from direct cost so a fuel-price swing is a one-field change.</span>
+              <span class="money-input"><i>$</i><input id="setOperatingCostPerMile" type="number" min="0" step="0.01" inputmode="decimal" placeholder="1.40"><em>/mi</em></span>
+            </label>
+            <p class="settings-derived" id="setPerMileTotal">Total internal cost per mile — <b>$0.00</b></p>
+          </div>
+        </fieldset>
+
+        <fieldset class="fieldgroup wide">
+          <legend>What you want to make on it</legend>
+          <div class="fieldgroup-body">
+            <label>Margin type
+              <select id="setMarginMode">
+                <option value="percent">Percentage markup on cost</option>
+                <option value="fixed">Fixed dollar amount per haul</option>
+              </select>
+            </label>
+            <label id="setMarginPercentWrap">Markup on cost
+              <span class="hint">Added on top of total internal cost. 25% on a $500 cost quotes at $625 — which is a 20% margin of the customer price.</span>
+              <span class="money-input"><input id="setMarginPercent" type="number" min="0" step="0.1" inputmode="decimal" placeholder="25"><em>%</em></span>
+            </label>
+            <label id="setMarginFixedWrap" class="hidden">Fixed margin per haul
+              <span class="hint">A flat profit figure added to internal cost, whatever the distance.</span>
+              <span class="money-input"><i>$</i><input id="setMarginFixed" type="number" min="0" step="0.01" inputmode="decimal" placeholder="300.00"></span>
+            </label>
+            <label>Minimum charge
+              <span class="hint">No quote goes out below this, however short the haul. Leave at 0 for no floor.</span>
+              <span class="money-input"><i>$</i><input id="setMinimumCharge" type="number" min="0" step="0.01" inputmode="decimal" placeholder="250.00"></span>
+            </label>
+            <label class="check-label">
+              <input id="setRoundTripDefault" type="checkbox">
+              <span>Price new hauls as round trips by default
+                <span class="hint">The truck has to come back. Doubles billable miles unless you switch it off on the haul.</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="wide" id="settingsPreview"></div>
+
+        <button class="btn primary wide" type="submit"><span class="btn-label">Save rate card</span></button>
+        <p class="settings-meta" id="settingsMeta"></p>
+      </form>
+    </section>
 
     <div id="notice" class="notice hidden" role="status"></div>
     <div id="clashWarn" class="clashwarn hidden" role="alert"></div>
@@ -235,8 +316,73 @@
 
         <label>Customer<input id="customer" required maxlength="120" placeholder="Dealership or customer"></label>
         <label>Equipment<input id="equipment" maxlength="80" placeholder="JCB 3CX"></label>
-        <label>Pickup<input id="pickup" required maxlength="180" placeholder="Yard / origin"></label>
-        <label>Delivery<input id="delivery" required maxlength="180" placeholder="Job site / destination"></label>
+
+        <div class="routebox wide">
+          <div class="routebox-head">
+            <span class="routebox-tag">ROUTE</span>
+            <a id="mapDirections" class="maplink" href="#" target="_blank" rel="noopener noreferrer" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 20l-5.5 2V6L9 4m0 16l6-2m-6 2V4m6 14l5.5 2V6L15 4m0 14V4m0 0L9 6"/></svg>
+              Directions in Google Maps
+            </a>
+          </div>
+          <label>Pickup / origin
+            <span class="hint">Plain English is fine — a street address, a yard name, a town, or "Miller's pit off Hwy 6".</span>
+            <span class="addr-input">
+              <input id="pickup" required maxlength="240" list="knownPlaces" autocomplete="off"
+                     placeholder="e.g. 1420 S Main St, Heber City, UT">
+              <a id="mapPickup" class="addr-map" href="#" target="_blank" rel="noopener noreferrer" title="Open pickup in Google Maps" hidden aria-label="Open pickup in Google Maps">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>
+              </a>
+            </span>
+          </label>
+          <label>Delivery / destination
+            <span class="hint">Where the equipment is going.</span>
+            <span class="addr-input">
+              <input id="delivery" required maxlength="240" list="knownPlaces" autocomplete="off"
+                     placeholder="e.g. Job site — 300 N 1200 W, Vernal, UT">
+              <a id="mapDelivery" class="addr-map" href="#" target="_blank" rel="noopener noreferrer" title="Open delivery in Google Maps" hidden aria-label="Open delivery in Google Maps">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>
+              </a>
+            </span>
+          </label>
+          <datalist id="knownPlaces"></datalist>
+
+          <div class="distrow">
+            <label class="dist-miles">Route distance (one way)
+              <span class="money-input"><input id="tripMiles" type="number" min="0" step="0.1" inputmode="decimal" placeholder="0.0"><em>mi</em></span>
+            </label>
+            <button id="lookupRoute" class="btn ghost" type="button">Look up distance</button>
+            <label class="check-label rt">
+              <input id="tripRoundTrip" type="checkbox">
+              <span>Round trip <span class="hint">bills the return leg</span></span>
+            </label>
+          </div>
+          <div id="distSource" class="distsource" role="status"></div>
+        </div>
+
+        <!-- QUOTE -->
+        <div class="quotebox wide" id="quoteBox">
+          <div class="quotebox-head">
+            <span class="routebox-tag">QUOTE</span>
+            <span id="quoteState" class="quote-state"></span>
+          </div>
+          <div id="quoteBreakdown" class="quote-breakdown"></div>
+          <div class="adjustrow">
+            <label>Discount
+              <span class="money-input"><i>$</i><input id="tripDiscount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></span>
+            </label>
+            <label>Surcharge
+              <span class="hint">Permits, escort, wait time</span>
+              <span class="money-input"><i>$</i><input id="tripSurcharge" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></span>
+            </label>
+            <label>Override customer price
+              <span class="hint">Blank = use the calculated price</span>
+              <span class="money-input"><i>$</i><input id="tripPriceOverride" type="number" min="0" step="0.01" inputmode="decimal" placeholder="calculated"></span>
+            </label>
+          </div>
+          <div id="quoteTotal" class="quote-total"></div>
+        </div>
+
         <label>Driver<input id="driver" maxlength="80" placeholder="Assigned operator"></label>
         <label>Status
           <select id="status">
@@ -259,6 +405,6 @@
 
 </main>
 
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

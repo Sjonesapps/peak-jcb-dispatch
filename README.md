@@ -1,6 +1,6 @@
 # Peak JCB Dispatch
 
-Shared transportation scheduling app for Peak JCB. Static frontend plus a Netlify Function API for email/password authentication and CRUD backed by Netlify Blobs.
+Shared transportation scheduling and quoting app for Peak JCB. Static frontend plus a Netlify Function API for email/password authentication and CRUD backed by Netlify Blobs.
 
 Peak JCB runs **one transport truck**, so every haul is an exclusive booking on a single shared resource. The API rejects any booking that overlaps a live haul.
 
@@ -19,10 +19,18 @@ Each haul stores `date`, `start`, `end` and an optional `endDate` for multi-day 
 - **Upcoming / Past** — split on the haul's *end time*, not its date, so a haul running right now reads as current rather than past.
 - Any pre-existing overlapping bookings are surfaced as warnings so legacy data can be cleaned up.
 
+## Routing and quotes
+
+- An authenticated, editable rate card persists in the same strongly consistent Netlify Blob store as trips. Existing trip records remain backward-compatible.
+- Pickup and delivery remain the persisted origin/destination fields. Every route has a no-key Google Maps directions link.
+- Live mileage is calculated server-side by geocoding with OpenStreetMap Nominatim, then routing with the public OSRM service. It uses no API key or paid billing. Public-service or geocoding failures fall back to clearly labeled manual mileage.
+- Each priced trip snapshots the rate card used for that quote. A salesperson can add a discount, surcharge, or final price override and see effective dollar margin, margin percentage, and markup immediately.
+- Quote arithmetic lives in `public/quote-model.mjs`, imported by both the browser and API. The free route adapter lives in `netlify/lib/route-provider.mjs`; provider credentials cannot reach the browser because route lookup is exposed only through the authenticated API.
+
 ## Local
 
     npm install
-    npm test          # syntax check the function
+    npm test          # syntax checks plus quote and route-adapter tests
     npx netlify dev
 
 ## Deployment

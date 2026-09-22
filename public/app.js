@@ -1,6 +1,12 @@
 /* Peak JCB Dispatch — command interface
    Auth, storage and the API contract are unchanged; the schema gained
-   start/end times and an optional return date for multi-day hauls. */
+   start/end times and an optional return date for multi-day hauls, and then a
+   rate card plus per-haul route distance and pricing.
+
+   Loaded as an ES module so the quote maths can be imported from the same file
+   the API uses — the editor preview and the stored quote cannot disagree. */
+
+import { computeQuote, cleanSettings, DEFAULT_SETTINGS, isConfigured, fmtMoney, fmtMiles } from "/quote-model.mjs";
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -20,6 +26,11 @@ let filter = "calendar";
 let calCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let selectedDay = null;    // ISO date string
 let noticeTimer = null;
+let settings = { ...DEFAULT_SETTINGS };
+let canEditSettings = true;
+let settingsRestricted = false;
+let routeConfigured = false;  // live route lookup available server-side?
+let routeProvider = { id: null, label: "route provider", limitations: "" };
 
 /* ---------- api ---------- */
 function api(path, options = {}) {
@@ -110,6 +121,127 @@ function notice(text, bad = false) {
   if (text) noticeTimer = setTimeout(() => el.classList.add("hidden"), 5200);
 }
 
+/* ---------- google maps links ----------
+   These are plain URLs into the consumer Maps site. They carry no API key, cost
+   nothing, and work for free-text place names as readily as postal addresses,
+   so every haul gets a working map link whether or not route lookup is wired
+   up. */
+const mapSearchUrl = q => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+const mapDirUrl = (from, to) =>
+  `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(from)}&destination=${encodeURIComponent(to)}&travelmode=driving`;
+
+const distanceSource = source => {
+  if (source === "osm-osrm") return { name: "OpenStreetMap + OSRM", tag: "osm/osrm" };
+  if (source === "maps") return { name: "Google Routes (legacy)", tag: "google" };
+  return { name: "Distance entered by hand", tag: "manual" };
+};
+
+/* ---------- rate card ---------- */
+async function loadSettings() {
+  try {
+    const b = await api("settings");
+    settings = { ...DEFAULT_SETTINGS, ...b.settings };
+    canEditSettings = b.canEdit !== false;
+    settingsRestricted = !!b.restricted;
+  } catch {
+    /* A missing rate card must never take the board down — quoting simply stays
+       switched off until it loads. */
+    settings = { ...DEFAULT_SETTINGS };
+  }
+}
+
+async function loadConfig() {
+  try {
+    const b = await api("config");
+    /* Accept the older Google-shaped response during a rolling upgrade. */
+    const route = b.route || b.maps || {};
+    routeConfigured = !!route.configured;
+    routeProvider = {
+      id: route.provider || null,
+      label: route.label || (route.provider === "google-routes" ? "Google Routes" : "route provider"),
+      limitations: route.limitations || ""
+    };
+  } catch {
+    routeConfigured = false;
+    routeProvider = { id: null, label: "route provider", limitations: "" };
+  }
+}
+
+/* live rate card straight off the settings form, for the inline preview */
+const formSettings = () => cleanSettings({
+  baseCost: $("#setBaseCost").value,
+  costPerMile: $("#setCostPerMile").value,
+  operatingCostPerMile: $("#setOperatingCostPerMile").value,
+  marginMode: $("#setMarginMode").value,
+  marginPercent: $("#setMarginPercent").value,
+  marginFixed: $("#setMarginFixed").value,
+  minimumCharge: $("#setMinimumCharge").value,
+  roundTripDefault: $("#setRoundTripDefault").checked
+}, settings);
+
+function fillSettingsForm() {
+  $("#setBaseCost").value = settings.baseCost || "";
+  $("#setCostPerMile").value = settings.costPerMile || "";
+  $("#setOperatingCostPerMile").value = settings.operatingCostPerMile || "";
+  $("#setMarginMode").value = settings.marginMode || "percent";
+  $("#setMarginPercent").value = settings.marginPercent || "";
+  $("#setMarginFixed").value = settings.marginFixed || "";
+  $("#setMinimumCharge").value = settings.minimumCharge || "";
+  $("#setRoundTripDefault").checked = !!settings.roundTripDefault;
+
+  const lock = $("#settingsLock");
+  $$("#settingsForm input, #settingsForm select, #settingsForm button").forEach(el => { el.disabled = !canEditSettings; });
+  if (!canEditSettings) {
+    lock.className = "settings-lock bad";
+    lock.innerHTML = `<b>Read-only</b> Your account is not on the pricing admin list, so you can see the rate card but not change it.`;
+  } else if (!settingsRestricted) {
+    lock.className = "settings-lock warn";
+    lock.innerHTML = `<b>Open to every signed-in user</b> No pricing admin list is configured, so anyone who can sign in can change these rates. Set the <code>PRICING_ADMINS</code> environment variable to restrict it.`;
+  } else {
+    lock.className = "settings-lock hidden";
+    lock.innerHTML = "";
+  }
+
+  $("#settingsMeta").textContent = settings.updatedAt
+    ? `Last changed ${new Date(settings.updatedAt).toLocaleString("en-US")}${settings.updatedBy ? " by " + settings.updatedBy : ""}.`
+    : "This rate card has not been saved yet.";
+  syncMarginMode();
+  renderSettingsPreview();
+}
+
+function syncMarginMode() {
+  const fixed = $("#setMarginMode").value === "fixed";
+  $("#setMarginPercentWrap").classList.toggle("hidden", fixed);
+  $("#setMarginFixedWrap").classList.toggle("hidden", !fixed);
+}
+
+/* A worked example makes an abstract rate card concrete before it is saved. */
+function renderSettingsPreview() {
+  const s = formSettings();
+  $("#setPerMileTotal").innerHTML =
+    `Total internal cost per mile — <b>${esc(fmtMoney(s.costPerMile + s.operatingCostPerMile))}</b>`;
+
+  const el = $("#settingsPreview");
+  if (!isConfigured(s)) {
+    el.innerHTML = `<div class="preview empty">Enter your costs above to see a worked example.</div>`;
+    return;
+  }
+  const rows = [50, 150, 300].map(mi => {
+    const q = computeQuote({ miles: mi, roundTrip: s.roundTripDefault }, s);
+    return `<tr><td>${fmtMiles(mi)} mi${s.roundTripDefault ? " <i>rt</i>" : ""}</td>
+      <td>${esc(fmtMoney(q.internalCost))}</td>
+      <td>${esc(fmtMoney(q.marginTarget))}</td>
+      <td class="price">${esc(fmtMoney(q.customerTotal))}${q.minimumApplied ? ` <i title="Minimum charge applied">min</i>` : ""}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="preview">
+    <p class="preview-tag">WORKED EXAMPLE${s.roundTripDefault ? " · ROUND TRIP" : " · ONE WAY"}</p>
+    <table class="preview-table">
+      <thead><tr><th>Distance</th><th>Your cost</th><th>Margin</th><th>Customer pays</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
 /* ---------- session clock ---------- */
 function tickClock() {
   const now = new Date();
@@ -133,7 +265,12 @@ function showApp() {
     requestAnimationFrame(moveGlider);
     skeletons();
     api("me").then(b => setUser(b.email)).catch(() => {});
-    loadTrips();
+    /* Rate card and capability probe land before the board so the first render
+       already knows how to price and whether route lookup exists. */
+    Promise.all([loadSettings(), loadConfig()]).then(() => { loadTrips(); renderDistSource(); });
+  } else {
+    $("#settings").classList.add("hidden");
+    $("#editor").classList.add("hidden");
   }
 }
 
@@ -180,6 +317,40 @@ $("#logout").onclick = () => {
   showApp();
 };
 
+/* ---------- rate card panel ---------- */
+$("#openSettings").onclick = () => {
+  const panel = $("#settings");
+  const opening = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !opening);
+  if (opening) { fillSettingsForm(); panel.scrollIntoView({ behavior: "smooth", block: "nearest" }); }
+};
+$("#closeSettings").onclick = () => $("#settings").classList.add("hidden");
+$("#setMarginMode").addEventListener("change", () => { syncMarginMode(); renderSettingsPreview(); });
+["setBaseCost", "setCostPerMile", "setOperatingCostPerMile", "setMarginPercent", "setMarginFixed", "setMinimumCharge", "setRoundTripDefault"]
+  .forEach(id => $("#" + id).addEventListener("input", renderSettingsPreview));
+$("#setRoundTripDefault").addEventListener("change", renderSettingsPreview);
+
+$("#settingsForm").onsubmit = async e => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type=submit]');
+  setLoading(btn, true);
+  try {
+    const b = await api("settings", { method: "PUT", body: JSON.stringify(formSettings()) });
+    settings = { ...DEFAULT_SETTINGS, ...b.settings };
+    canEditSettings = b.canEdit !== false;
+    settingsRestricted = !!b.restricted;
+    fillSettingsForm();
+    notice("Rate card saved. New quotes use these figures.");
+    /* Existing hauls keep the rate card they were priced under, so the board
+       does not silently reprice work already quoted to a customer. */
+    renderQuote();
+  } catch (x) {
+    notice(x.message, true);
+  } finally {
+    setLoading(btn, false);
+  }
+};
+
 /* ---------- data ---------- */
 function skeletons(n = 3) {
   $("#tripList").innerHTML = Array.from({ length: n }, () => '<div class="skeleton"></div>').join("");
@@ -188,6 +359,7 @@ function skeletons(n = 3) {
 async function loadTrips(quiet = true) {
   try {
     trips = (await api("trips")).trips;
+    refreshPlaces();
     render();
   } catch (e) {
     if (/Authentication/i.test(e.message)) $("#logout").click();
@@ -283,6 +455,23 @@ function dateParts(iso) {
   };
 }
 
+/* Route distance, the map link, and the priced total — the three things the
+   yard wants off a card without opening it. */
+function routeFoot(t) {
+  const p = t.pricing || {};
+  const q = t.quote || computeQuote(p, t.rateCard || DEFAULT_SETTINGS);
+  const bits = [];
+  if (t.pickup && t.delivery)
+    bits.push(`<a class="maplink sm" href="${esc(mapDirUrl(t.pickup, t.delivery))}" target="_blank" rel="noopener noreferrer">Directions</a>`);
+  if (p.miles !== null && p.miles !== undefined) {
+    const source = distanceSource(p.milesSource);
+    bits.push(`<span class="rf-mi" title="${esc(source.name)}">${esc(fmtMiles(q.billableMiles))} mi${p.roundTrip ? " rt" : ""}<i>${esc(source.tag)}</i></span>`);
+  }
+  if (q.ready)
+    bits.push(`<span class="rf-price${q.belowCost ? " bad" : ""}" title="Customer total${q.overridden ? " (price overridden)" : ""}">${esc(fmtMoney(q.customerTotal))}${q.overridden ? "<i>set</i>" : ""}</span>`);
+  return bits.length ? `<div class="routefoot">${bits.join("")}</div>` : "";
+}
+
 function tripCard(t, i, bad) {
   const d = dateParts(t.date);
   const status = slug(t.status);
@@ -304,6 +493,7 @@ function tripCard(t, i, bad) {
         <div class="route-row from"><span class="route-node"></span><span class="route-tag">FROM</span><span class="route-val">${esc(t.pickup)}</span></div>
         <div class="route-row to"><span class="route-node"></span><span class="route-tag">TO</span><span class="route-val">${esc(t.delivery)}</span></div>
       </div>
+      ${routeFoot(t)}
     </div>
     <div class="meta">
       <div class="meta-row">${ICON_EQUIP}<span>${esc(t.equipment || "Equipment TBD")}</span></div>
@@ -414,8 +604,8 @@ function renderDayPanel() {
       <span class="dayrow-time">${esc(fmtTime(t.start))}<i>–</i>${esc(fmtTime(t.end))}${cont ? `<b>multi-day</b>` : ""}</span>
       <span class="dayrow-body">
         <strong>${esc(t.customer)}</strong>
-        <span>${esc(t.pickup)} → ${esc(t.delivery)}</span>
-        <span class="dayrow-meta">${esc(t.equipment || "Equipment TBD")} · ${esc(t.driver || "Driver TBD")} · ${esc(t.status)}</span>
+        <span>${esc(t.pickup)} → ${esc(t.delivery)}${t.pickup && t.delivery ? ` <a class="maplink xs" href="${esc(mapDirUrl(t.pickup, t.delivery))}" target="_blank" rel="noopener noreferrer" title="Directions in Google Maps">map</a>` : ""}</span>
+        <span class="dayrow-meta">${esc(t.equipment || "Equipment TBD")} · ${esc(t.driver || "Driver TBD")} · ${esc(t.status)}${t.quote?.ready ? ` · <b>${esc(fmtMoney(t.quote.customerTotal))}</b>` : ""}</span>
       </span>
       <button class="dayrow-edit" type="button" data-edit="${esc(t.id)}">Edit</button>
     </div>`;
@@ -516,6 +706,146 @@ $$(".filter").forEach(b => {
 window.addEventListener("resize", moveGlider);
 
 /* ---------- editor ---------- */
+let milesSource = "";          // "manual" | "osm-osrm" | legacy "maps" | ""
+let editingRateCard = null;    // rate card the open haul was originally quoted under
+
+/* ---------- route + quote ---------- */
+const formPricing = () => {
+  const miles = $("#tripMiles").value;
+  const override = $("#tripPriceOverride").value;
+  return {
+    miles: miles === "" ? null : Number(miles),
+    milesSource,
+    roundTrip: $("#tripRoundTrip").checked,
+    discount: Number($("#tripDiscount").value) || 0,
+    surcharge: Number($("#tripSurcharge").value) || 0,
+    priceOverride: override === "" ? null : Number(override)
+  };
+};
+
+/* Previously-used places become autocomplete suggestions. Free, and it keeps
+   the same yard spelled the same way across hauls. */
+function refreshPlaces() {
+  const seen = new Set();
+  trips.forEach(t => { [t.pickup, t.delivery].forEach(v => { if (v && v.trim()) seen.add(v.trim()); }); });
+  $("#knownPlaces").innerHTML = Array.from(seen).sort()
+    .map(v => `<option value="${esc(v)}"></option>`).join("");
+}
+
+function syncMapLinks() {
+  const from = $("#pickup").value.trim(), to = $("#delivery").value.trim();
+  const dir = $("#mapDirections"), mp = $("#mapPickup"), md = $("#mapDelivery");
+  mp.hidden = !from; if (from) mp.href = mapSearchUrl(from);
+  md.hidden = !to;   if (to)   md.href = mapSearchUrl(to);
+  dir.hidden = !(from && to); if (from && to) dir.href = mapDirUrl(from, to);
+}
+
+/* States the mileage field can be in, said plainly. A provider result and a
+   figure somebody typed are never blurred. */
+function renderDistSource(msg) {
+  const el = $("#distSource");
+  if (!el) return;
+  if (msg) { el.className = "distsource " + msg.tone; el.innerHTML = msg.html; return; }
+  if (milesSource === "osm-osrm") {
+    el.className = "distsource ok";
+    el.innerHTML = `<b>OpenStreetMap + OSRM</b> Best-effort driving distance returned by the free server-side route service. Edit the field to override it.`;
+  } else if (milesSource === "maps") {
+    el.className = "distsource ok";
+    el.innerHTML = `<b>Google Routes · legacy</b> This saved distance came from the former Google route provider. Edit it or look it up again to replace it.`;
+  } else if (!routeConfigured) {
+    el.className = "distsource manual";
+    el.innerHTML = `<b>Manual distance</b> Live route lookup is not enabled on this site, so mileage is entered by hand — nothing here is measured automatically. Use <em>Directions in Google Maps</em> above to read the distance, then type it in.`;
+  } else {
+    el.className = "distsource manual";
+    el.innerHTML = `<b>Manual distance</b> Typed by hand. Use <em>Look up distance</em> for a best-effort ${esc(routeProvider.label)} driving distance. Google Maps opens separately for directions.`;
+  }
+}
+
+$("#lookupRoute").onclick = async e => {
+  const btn = e.currentTarget;
+  const origin = $("#pickup").value.trim(), destination = $("#delivery").value.trim();
+  if (!origin || !destination) {
+    renderDistSource({ tone: "bad", html: `<b>Need both ends</b> Fill in pickup and delivery before looking up a distance.` });
+    return;
+  }
+  setLoading(btn, true);
+  renderDistSource({ tone: "busy", html: `<b>Looking up…</b> Asking ${esc(routeProvider.label)} for the driving distance.` });
+  try {
+    const r = await api("route", { method: "POST", body: JSON.stringify({ origin, destination }) });
+    $("#tripMiles").value = r.miles;
+    milesSource = r.source || routeProvider.id || "manual";
+    renderDistSource({
+      tone: "ok",
+      html: `<b>${esc(r.provider || routeProvider.label)}</b> ${esc(fmtMiles(r.miles))} mi driving${r.minutes ? ` · about ${esc(fmtDur(r.minutes))} behind the wheel` : ""}. Best-effort public routing; edit the field to override it.`
+    });
+    renderQuote();
+  } catch (x) {
+    milesSource = $("#tripMiles").value === "" ? "" : "manual";
+    renderDistSource({
+      tone: "bad",
+      html: `<b>Manual fallback</b> ${esc(x.message)} Open the Google Maps directions link above to verify the route, then enter mileage by hand.`
+    });
+  } finally {
+    setLoading(btn, false);
+  }
+};
+
+function renderQuote() {
+  const p = formPricing();
+  const q = computeQuote(p, settings);
+  const state = $("#quoteState"), bd = $("#quoteBreakdown"), tot = $("#quoteTotal");
+  if (!state) return;
+
+  if (!q.configured) {
+    state.className = "quote-state warn";
+    state.textContent = "No rate card";
+    bd.innerHTML = `<p class="quote-blank">Pricing is not configured yet. Open <b>Rate card</b> to enter your costs and margin, and quotes will calculate here.</p>`;
+    tot.innerHTML = "";
+    return;
+  }
+  if (!q.hasMiles) {
+    state.className = "quote-state warn";
+    state.textContent = "Needs distance";
+    bd.innerHTML = `<p class="quote-blank">Enter the route distance above to calculate a quote.</p>`;
+    tot.innerHTML = "";
+    return;
+  }
+
+  state.className = "quote-state ok";
+  state.textContent = milesSource === "osm-osrm"
+    ? "Priced · OSM/OSRM distance"
+    : milesSource === "maps" ? "Priced · legacy Google distance" : "Priced · manual distance";
+
+  const stale = editingRateCard && JSON.stringify(computeQuote(p, editingRateCard).customerTotal) !== JSON.stringify(q.customerTotal);
+  const row = (label, val, cls = "") => `<div class="qrow ${cls}"><span>${label}</span><b>${esc(val)}</b></div>`;
+
+  bd.innerHTML =
+    row(`Billable miles${q.roundTrip ? ` <i>${fmtMiles(q.oneWayMiles)} mi each way, round trip</i>` : ` <i>one way</i>`}`, fmtMiles(q.billableMiles) + " mi") +
+    row(`Base charge <i>per haul</i>`, fmtMoney(q.baseCost)) +
+    row(`Direct cost <i>${fmtMoney(settings.costPerMile)}/mi</i>`, fmtMoney(q.directCost)) +
+    row(`Operating / fuel <i>${fmtMoney(settings.operatingCostPerMile)}/mi</i>`, fmtMoney(q.operatingCost)) +
+    row(`<b>Your cost</b>`, fmtMoney(q.internalCost), "sub") +
+    row(`Target margin <i>${q.marginMode === "fixed" ? "fixed" : settings.marginPercent + "% markup on cost"}</i>`, fmtMoney(q.marginTarget)) +
+    row(`Calculated price${q.minimumApplied ? ` <i>minimum charge applied</i>` : ""}`, fmtMoney(q.suggested), "sub") +
+    (q.discount ? row(`Discount`, "-" + fmtMoney(q.discount), "neg") : "") +
+    (q.surcharge ? row(`Surcharge`, "+" + fmtMoney(q.surcharge), "pos") : "") +
+    (q.overridden ? row(`Price overridden <i>calculated ${fmtMoney(q.suggested)}</i>`, fmtMoney(q.customerTotal), "override") : "");
+
+  const marginCls = q.belowCost ? "bad" : q.realizedMarginPct !== null && q.realizedMarginPct < 10 ? "thin" : "ok";
+  tot.innerHTML = `
+    <div class="qtotal">
+      <span class="qtotal-label">Customer total</span>
+      <span class="qtotal-val">${esc(fmtMoney(q.customerTotal))}</span>
+    </div>
+    <div class="qmargin ${marginCls}">
+      <span>Margin <b>${esc(fmtMoney(q.realizedMargin))}</b></span>
+      <span>${q.realizedMarginPct === null ? "—" : esc(q.realizedMarginPct.toFixed(1)) + "% of price"}</span>
+      <span>${q.realizedMarkupPct === null ? "—" : esc(q.realizedMarkupPct.toFixed(1)) + "% on cost"}</span>
+    </div>
+    ${q.belowCost ? `<p class="qwarn">⚠ This price is below what the haul costs you — you lose ${esc(fmtMoney(Math.abs(q.realizedMargin)))} on it.</p>` : ""}
+    ${stale ? `<p class="qnote">This haul was originally quoted under an older rate card. Saving reprices it at current rates.</p>` : ""}`;
+}
+
 const FIELDS = ["date", "endDate", "start", "end", "customer", "pickup", "delivery", "equipment", "driver", "status", "notes"];
 const INPUT = { date: "tripDate", endDate: "tripEndDate", start: "tripStart", end: "tripEnd" };
 const inputId = k => INPUT[k] || k;
@@ -542,6 +872,23 @@ function openEditor(t = {}) {
   $("#endDateWrap").classList.toggle("hidden", !multi);
   $("#tripEndDate").value = t.endDate || t.date || $("#tripDate").value;
 
+  /* pricing inputs — a haul that was never priced starts blank rather than at
+     zero, so "not quoted yet" stays distinguishable from "quoted at nothing". */
+  const p = t.pricing || {};
+  $("#tripMiles").value = p.miles === null || p.miles === undefined ? "" : p.miles;
+  $("#tripRoundTrip").checked = p.roundTrip === undefined ? !!settings.roundTripDefault : !!p.roundTrip;
+  $("#tripDiscount").value = p.discount || "";
+  $("#tripSurcharge").value = p.surcharge || "";
+  $("#tripPriceOverride").value = p.priceOverride === null || p.priceOverride === undefined ? "" : p.priceOverride;
+  milesSource = p.milesSource || "";
+  /* An edit reprices against the current rate card; the card the haul was
+     originally quoted under is shown alongside if it has since changed. */
+  editingRateCard = t.rateCard || null;
+
+  refreshPlaces();
+  syncMapLinks();
+  renderDistSource();
+  renderQuote();
   checkAvailability();
   $("#editor").scrollIntoView({ behavior: "smooth", block: "nearest" });
   setTimeout(() => $("#customer").focus({ preventScroll: true }), 320);
@@ -628,12 +975,36 @@ $("#avail").addEventListener("click", e => {
   $("#" + id).addEventListener("change", checkAvailability);
 });
 
+/* Address edits refresh the map links; pricing edits reprice live so the
+   salesperson sees the margin move as they discount. */
+["pickup", "delivery"].forEach(id => {
+  $("#" + id).addEventListener("input", () => {
+    syncMapLinks();
+    /* The stored distance belongs to the old pair of addresses, so a changed
+       endpoint demotes a provider figure back to a typed one rather than leaving
+       a stale number looking authoritative. */
+    if (milesSource && milesSource !== "manual") { milesSource = "manual"; renderDistSource({ tone: "warn", html: `<b>Route changed</b> The distance below was looked up for the previous addresses. Look it up again or edit it by hand.` }); }
+  });
+});
+
+$("#tripMiles").addEventListener("input", () => {
+  milesSource = $("#tripMiles").value === "" ? "" : "manual";
+  renderDistSource();
+  renderQuote();
+});
+
+["tripRoundTrip", "tripDiscount", "tripSurcharge", "tripPriceOverride"].forEach(id => {
+  $("#" + id).addEventListener("input", renderQuote);
+  $("#" + id).addEventListener("change", renderQuote);
+});
+
 $("#tripForm").onsubmit = async e => {
   e.preventDefault();
   const btn = e.target.querySelector('button[type=submit]');
   const id = $("#tripId").value;
   const data = Object.fromEntries(FIELDS.map(k => [k, $("#" + inputId(k)).value]));
   if (!$("#multiDay").checked) data.endDate = data.date;
+  data.pricing = formPricing();
   setLoading(btn, true);
   try {
     await api(id ? "trips/" + id : "trips", {
